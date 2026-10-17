@@ -1,0 +1,39 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Linebell",
+      "hasCanvas": true,
+      "bodyTextLen": 668,
+      "bodyTextHash": "97e97e4714c553a591a8d1f65b8c1e7568cab5d5bdc0340dee016028b0c7c6ca",
+      "bodyTextPrefix": "LINEBELL Set a line. It rings. Connecting BTC ETH SOL BNB XRP DO",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Linebell",
+      "hasCanvas": true,
+      "bodyTextLen": 679,
+      "bodyTextHash": "03afc387d1be96dda3e59f7335b41616f53bd0743907bca7a85e409c432d7ef2",
+      "bodyTextPrefix": "LINEBELL Set a line. It rings. Live BTC ETH SOL BNB XRP DOGE ADA",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [
+    "BRAND WARNING: this looks like a game/canvas app but src/lib/og/site.json is missing \"type\": \"x:game\". X uses og:type=x:game to present the unfurl as a game card — set it in /workspace/src/lib/og/site.json per /workspace/.grok/skills/og/SKILL.md. Do not invent x:type or overload twitter:card as the game signal.",
+    "BRAND WARNING: this looks like a game/canvas app but /workspace/public/x-banner.jpg is missing. Games need a 50:11 X feed card (1200×264 JPEG) at public/x-banner.jpg — open /workspace/.grok/skills/og/SKILL.md and finish the brand-asset pass."
+  ],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
