@@ -1,13 +1,871 @@
 import { i as __toESM } from "../_runtime.mjs";
 import { W as require_react, y as require_jsx_runtime } from "../_libs/@tanstack/react-router+[...].mjs";
-import { i as BellRing, n as Trash2, r as Bell } from "../_libs/lucide-react.mjs";
-import { _ as shouldFire, a as conditionLabel, b as previewPathPrefix, c as isAlert, d as isSymbol, f as marketBySymbol, g as roundPrice, h as parsePrice, i as coinbaseProductId, l as isCoinbase, m as normalizeAlert, n as INTERVALS, o as formatPrice, p as migrateSymbol, r as MARKETS, s as hitPhrase, u as isInterval, v as toneLabel, y as zoneHot } from "./router-B9R-dVkb.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-5zpDKrC3.js
+import { a as Pause, c as BellRing, i as Play, n as Trash2, o as Check, r as RotateCcw, s as Bell } from "../_libs/lucide-react.mjs";
+import { _ as shouldFire, a as conditionLabel, b as previewPathPrefix, c as isAlert, d as isSymbol, f as marketBySymbol, g as roundPrice, h as parsePrice, i as coinbaseProductId, l as isCoinbase, m as normalizeAlert, n as INTERVALS, o as formatPrice, p as migrateSymbol, r as MARKETS, s as hitPhrase, u as isInterval, v as toneLabel, y as zoneHot } from "./router-CsfkkUA-.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-C3IYoAs1.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
+function validateFakeoutInput(input) {
+	if (!Number.isFinite(input.level) || input.level <= 0) return "The key price level must be a positive number.";
+	if (input.confirmDistance == null || !Number.isFinite(input.confirmDistance) || input.confirmDistance <= 0) return "The confirmation distance must be a positive number.";
+	if (input.returnDistance == null || !Number.isFinite(input.returnDistance) || input.returnDistance <= 0) return "The return distance must be a positive number.";
+	return null;
+}
+function fakeoutIsActive(monitor) {
+	return !monitor.paused && (monitor.status === "waiting" || monitor.status === "confirmed");
+}
+function fakeoutDirectionLabel(direction) {
+	return direction === "up" ? "Breakout above" : "Breakout below";
+}
+function fakeoutStatusLabel(status) {
+	if (status === "confirmed") return "Breakout Confirmed";
+	if (status === "triggered") return "Possible Fakeout Detected";
+	return "Waiting for Breakout";
+}
+function fakeoutMessage(monitor) {
+	return monitor.direction === "up" ? "Possible upside fakeout — price snapped back below your level." : "Possible downside fakeout — price snapped back above your level.";
+}
+function rearmFakeout(monitor) {
+	return {
+		...monitor,
+		status: "waiting",
+		paused: false,
+		breakoutPrice: null,
+		breakoutTime: null,
+		returnPrice: null,
+		triggerTime: null
+	};
+}
+function stepFakeout(monitor, price, now = Date.now()) {
+	if (!fakeoutIsActive(monitor) || !Number.isFinite(price) || price <= 0) return {
+		monitor,
+		fired: false
+	};
+	if (monitor.status === "waiting") {
+		if (!(monitor.direction === "up" ? price >= monitor.level + monitor.confirmDistance : price <= monitor.level - monitor.confirmDistance)) return {
+			monitor,
+			fired: false
+		};
+		return {
+			monitor: {
+				...monitor,
+				status: "confirmed",
+				breakoutPrice: price,
+				breakoutTime: now
+			},
+			fired: false
+		};
+	}
+	if (!(monitor.direction === "up" ? price <= monitor.level - monitor.returnDistance : price >= monitor.level + monitor.returnDistance)) return {
+		monitor,
+		fired: false
+	};
+	return {
+		monitor: {
+			...monitor,
+			status: "triggered",
+			returnPrice: price,
+			triggerTime: now
+		},
+		fired: true
+	};
+}
 function apiPath(path) {
 	if (typeof window === "undefined") return path;
 	return `${previewPathPrefix(window.location.hostname, window.location.pathname) ?? ""}${path}`;
+}
+/**
+* Live quotes for selected symbols, reusing Linebell's market-data API and
+* Coinbase's public ticker WebSocket for crypto markets.
+*/
+function useFakeoutFeed(symbols) {
+	const key = [...new Set(symbols)].sort().join(",");
+	const [quotes, setQuotes] = (0, import_react.useState)({});
+	(0, import_react.useEffect)(() => {
+		const list = key ? key.split(",") : [];
+		if (!list.length) {
+			setQuotes({});
+			return;
+		}
+		let dead = false;
+		setQuotes(Object.fromEntries(list.map((symbol) => [symbol, {
+			tick: null,
+			status: "connecting"
+		}])));
+		const patch = (symbol, part) => {
+			if (dead) return;
+			setQuotes((current) => {
+				const prev = current[symbol] ?? {
+					tick: null,
+					status: "connecting"
+				};
+				return {
+					...current,
+					[symbol]: {
+						...prev,
+						...part
+					}
+				};
+			});
+		};
+		const cleanups = [];
+		for (const symbol of list) {
+			let socketOpen = false;
+			let hasData = false;
+			let marketClosed = false;
+			let latestBar = null;
+			let socket = null;
+			const publish = (bar, change) => {
+				if (dead) return;
+				patch(symbol, {
+					tick: {
+						symbol,
+						price: bar.close,
+						change,
+						open: bar.open,
+						high: bar.high,
+						low: bar.low,
+						close: bar.close
+					},
+					status: marketClosed ? "closed" : "live"
+				});
+			};
+			const load = async (full) => {
+				const res = await fetch(apiPath(`/api/market?symbol=${symbol}&interval=1m`), { cache: "no-store" });
+				if (!res.ok) throw new Error(`feed returned HTTP ${res.status}`);
+				const body = await res.json();
+				const candles = body.candles ?? [];
+				if (!candles.length) throw new Error("empty market feed");
+				if (dead) return;
+				const last = candles[candles.length - 1];
+				hasData = true;
+				latestBar = last;
+				marketClosed = Boolean(body.closed);
+				const change = Number.isFinite(body.change) ? body.change ?? null : null;
+				if (full || !socketOpen) publish(last, change);
+				else patch(symbol, { status: marketClosed ? "closed" : "live" });
+			};
+			const markOffline = (error) => {
+				if (dead) return;
+				console.warn(`[fakeout] Feed request failed for ${symbol}`, error);
+				patch(symbol, { status: hasData ? marketClosed ? "closed" : "live" : "offline" });
+			};
+			patch(symbol, { status: "connecting" });
+			load(true).catch(markOffline);
+			const product = coinbaseProductId(symbol);
+			if (isCoinbase(symbol) && product) try {
+				socket = new WebSocket("wss://ws-feed.exchange.coinbase.com");
+				socket.onopen = () => {
+					socket?.send(JSON.stringify({
+						type: "subscribe",
+						product_ids: [product],
+						channels: ["ticker"]
+					}));
+					socketOpen = true;
+					if (!dead) patch(symbol, { status: "live" });
+				};
+				socket.onclose = () => {
+					socketOpen = false;
+				};
+				socket.onerror = () => {
+					socketOpen = false;
+					socket?.close();
+				};
+				socket.onmessage = (event) => {
+					if (dead) return;
+					let message;
+					try {
+						message = JSON.parse(String(event.data));
+					} catch (error) {
+						console.warn(`[fakeout] Malformed Coinbase message for ${symbol}`, error);
+						return;
+					}
+					if (!message || typeof message !== "object") return;
+					const ticker = message;
+					if (ticker.type !== "ticker" || ticker.product_id !== product) return;
+					const price = Number(ticker.price);
+					const time = Date.parse(String(ticker.time)) / 1e3;
+					if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(time)) {
+						console.warn(`[fakeout] Invalid Coinbase ticker for ${symbol}`, message);
+						return;
+					}
+					const bucket = Math.floor(time / 60) * 60;
+					if (latestBar && bucket < latestBar.time) return;
+					latestBar = latestBar && bucket === latestBar.time ? {
+						...latestBar,
+						high: Math.max(latestBar.high, price),
+						low: Math.min(latestBar.low, price),
+						close: price
+					} : {
+						time: bucket,
+						open: price,
+						high: price,
+						low: price,
+						close: price
+					};
+					publish(latestBar, null);
+				};
+			} catch (error) {
+				socketOpen = false;
+				console.warn(`[fakeout] Coinbase WebSocket unavailable for ${symbol}`, error);
+			}
+			const poll = window.setInterval(() => {
+				if (dead || socketOpen) return;
+				load(false).catch(markOffline);
+			}, 5e3);
+			cleanups.push(() => {
+				window.clearInterval(poll);
+				socket?.close();
+			});
+		}
+		return () => {
+			dead = true;
+			for (const cleanup of cleanups) cleanup();
+		};
+	}, [key]);
+	return quotes;
+}
+var ctx = null;
+var activeStop = null;
+var master = null;
+var wakeLock = null;
+function context() {
+	if (!ctx) {
+		const Ctx = window.AudioContext || window.webkitAudioContext;
+		if (!Ctx) throw new Error("Audio isn't available in this browser.");
+		ctx = new Ctx();
+	}
+	return ctx;
+}
+async function unlockAudio() {
+	try {
+		const audio = context();
+		if (audio.state === "suspended") await audio.resume();
+		return audio.state === "running";
+	} catch {
+		return false;
+	}
+}
+function clampVolume(volume) {
+	if (!Number.isFinite(volume)) return .8;
+	return Math.min(1, Math.max(.05, volume));
+}
+function tone(audio, dest, freq, start, duration, gain, type = "sine") {
+	const osc = audio.createOscillator();
+	const amp = audio.createGain();
+	osc.type = type;
+	osc.frequency.setValueAtTime(freq, start);
+	amp.gain.setValueAtTime(1e-4, start);
+	amp.gain.exponentialRampToValueAtTime(Math.max(gain, 1e-4), start + .02);
+	amp.gain.exponentialRampToValueAtTime(1e-4, start + duration);
+	osc.connect(amp);
+	amp.connect(dest);
+	osc.start(start);
+	osc.stop(start + duration + .02);
+}
+function playPhone(audio, dest, t) {
+	[
+		659.25,
+		783.99,
+		659.25,
+		987.77,
+		783.99,
+		659.25
+	].forEach((freq, index) => {
+		tone(audio, dest, freq, t + index * .16, .22, .22);
+		tone(audio, dest, freq / 2, t + index * .16, .22, .05);
+	});
+}
+function playBell(audio, dest, t) {
+	tone(audio, dest, 880, t, .7, .24);
+	tone(audio, dest, 1320, t, .4, .08);
+	tone(audio, dest, 660, t + .45, .8, .16);
+}
+function playSiren(audio, dest, t) {
+	const osc = audio.createOscillator();
+	const amp = audio.createGain();
+	osc.type = "triangle";
+	osc.frequency.setValueAtTime(440, t);
+	osc.frequency.linearRampToValueAtTime(880, t + .35);
+	osc.frequency.linearRampToValueAtTime(440, t + .7);
+	osc.frequency.linearRampToValueAtTime(880, t + 1.02);
+	amp.gain.setValueAtTime(1e-4, t);
+	amp.gain.exponentialRampToValueAtTime(.22, t + .04);
+	amp.gain.exponentialRampToValueAtTime(1e-4, t + 1.05);
+	osc.connect(amp);
+	amp.connect(dest);
+	osc.start(t);
+	osc.stop(t + 1.08);
+}
+function startRingtone(kind, volume) {
+	activeStop?.();
+	const audio = context();
+	const gain = audio.createGain();
+	gain.gain.value = clampVolume(volume);
+	gain.connect(audio.destination);
+	master = gain;
+	let stopped = false;
+	let timer = 0;
+	const loop = () => {
+		if (stopped) return;
+		const t = audio.currentTime + .03;
+		if (kind === "phone") playPhone(audio, gain, t);
+		else if (kind === "bell") playBell(audio, gain, t);
+		else playSiren(audio, gain, t);
+		const wait = kind === "siren" ? 1200 : kind === "bell" ? 1700 : 1500;
+		timer = window.setTimeout(loop, wait);
+	};
+	const stop = () => {
+		if (stopped) return;
+		stopped = true;
+		window.clearTimeout(timer);
+		const now = audio.currentTime;
+		gain.gain.cancelScheduledValues(now);
+		gain.gain.setTargetAtTime(1e-4, now, .03);
+		window.setTimeout(() => {
+			gain.disconnect();
+			if (master === gain) master = null;
+		}, 180);
+		if (activeStop === stop) activeStop = null;
+	};
+	activeStop = stop;
+	loop();
+	return stop;
+}
+var customAudio = null;
+/**
+* Loop a user-imported sound (data URL from an <input type="file">).
+* Returns a stop function with the same contract as startRingtone.
+*/
+function startCustomRingtone(dataUrl, volume) {
+	activeStop?.();
+	const audio = new Audio(dataUrl);
+	audio.loop = true;
+	audio.volume = clampVolume(volume);
+	customAudio = audio;
+	audio.play().catch(() => {});
+	let stopped = false;
+	const stop = () => {
+		if (stopped) return;
+		stopped = true;
+		audio.pause();
+		audio.removeAttribute("src");
+		if (customAudio === audio) customAudio = null;
+		if (activeStop === stop) activeStop = null;
+	};
+	activeStop = stop;
+	return stop;
+}
+function setRingVolume(volume) {
+	if (customAudio) customAudio.volume = clampVolume(volume);
+	if (!master || !ctx) return;
+	master.gain.setTargetAtTime(clampVolume(volume), ctx.currentTime, .02);
+}
+function stopRingtone() {
+	activeStop?.();
+}
+async function holdAwake(on) {
+	if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+	try {
+		if (on) {
+			if (wakeLock && !wakeLock.released) return;
+			wakeLock = await navigator.wakeLock.request("screen");
+			return;
+		}
+		await wakeLock?.release();
+		wakeLock = null;
+	} catch {
+		wakeLock = null;
+	}
+}
+var STORAGE_KEY$1 = "linebell.fakeout.v1";
+var inputCls = "h-12 w-full rounded-xl border border-line bg-ink px-3 text-paper outline-none focus:border-copper";
+function loadSaved$1() {
+	try {
+		const raw = localStorage.getItem(STORAGE_KEY$1);
+		if (!raw) return {
+			monitors: [],
+			history: []
+		};
+		const data = JSON.parse(raw);
+		return {
+			monitors: Array.isArray(data.monitors) ? data.monitors : [],
+			history: Array.isArray(data.history) ? data.history.slice(0, 50) : []
+		};
+	} catch {
+		return {
+			monitors: [],
+			history: []
+		};
+	}
+}
+function statusBadgeCls(status) {
+	if (status === "confirmed") return "bg-copper text-copper-ink";
+	if (status === "triggered") return "bg-heat text-heat-ink";
+	return "bg-raised text-fog";
+}
+function fmtTime(ms) {
+	return ms == null ? "—" : new Date(ms).toLocaleTimeString();
+}
+function FakeoutPanel() {
+	const [symbol, setSymbol] = (0, import_react.useState)("XAUUSD");
+	const [levelText, setLevelText] = (0, import_react.useState)("");
+	const [direction, setDirection] = (0, import_react.useState)("up");
+	const [confirmText, setConfirmText] = (0, import_react.useState)("");
+	const [returnText, setReturnText] = (0, import_react.useState)("");
+	const [formError, setFormError] = (0, import_react.useState)(null);
+	const [monitors, setMonitors] = (0, import_react.useState)([]);
+	const [history, setHistory] = (0, import_react.useState)([]);
+	const [ready, setReady] = (0, import_react.useState)(false);
+	const [alarmId, setAlarmId] = (0, import_react.useState)(null);
+	const monitorsRef = (0, import_react.useRef)(monitors);
+	const alarmIdRef = (0, import_react.useRef)(null);
+	const alarmStopRef = (0, import_react.useRef)(null);
+	(0, import_react.useEffect)(() => {
+		const saved = loadSaved$1();
+		setMonitors(saved.monitors);
+		setHistory(saved.history);
+		setReady(true);
+	}, []);
+	(0, import_react.useEffect)(() => {
+		monitorsRef.current = monitors;
+	}, [monitors]);
+	(0, import_react.useEffect)(() => {
+		if (!ready) return;
+		const payload = {
+			monitors,
+			history: history.slice(0, 50)
+		};
+		try {
+			localStorage.setItem(STORAGE_KEY$1, JSON.stringify(payload));
+		} catch {}
+	}, [
+		ready,
+		monitors,
+		history
+	]);
+	const quotes = useFakeoutFeed((0, import_react.useMemo)(() => [...new Set(monitors.filter(fakeoutIsActive).map((m) => m.symbol))], [monitors]));
+	function silenceAlarm(id) {
+		if (alarmIdRef.current !== id) return;
+		stopRingtone();
+		alarmStopRef.current = null;
+		alarmIdRef.current = null;
+		setAlarmId(null);
+		if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(0);
+	}
+	function fireAlarm(monitor) {
+		stopRingtone();
+		alarmStopRef.current = null;
+		try {
+			alarmStopRef.current = startRingtone("siren", .95);
+		} catch {}
+		alarmIdRef.current = monitor.id;
+		setAlarmId(monitor.id);
+		if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([
+			200,
+			80,
+			200,
+			80,
+			400
+		]);
+		if (typeof Notification !== "undefined" && Notification.permission === "granted") try {
+			new Notification("Linebell — Anti-Fakeout", { body: fakeoutMessage(monitor) });
+		} catch {}
+	}
+	(0, import_react.useEffect)(() => {
+		let changed = false;
+		const fired = [];
+		const next = monitorsRef.current.map((monitor) => {
+			if (!fakeoutIsActive(monitor)) return monitor;
+			const price = quotes[monitor.symbol]?.tick?.price;
+			if (price == null || !Number.isFinite(price) || price <= 0) return monitor;
+			const result = stepFakeout(monitor, price);
+			if (result.monitor !== monitor) changed = true;
+			if (result.fired) fired.push(result.monitor);
+			return result.monitor;
+		});
+		if (changed) setMonitors(next);
+		for (const monitor of fired) {
+			setHistory((list) => [{
+				id: crypto.randomUUID(),
+				monitorId: monitor.id,
+				symbol: monitor.symbol,
+				level: monitor.level,
+				direction: monitor.direction,
+				breakoutPrice: monitor.breakoutPrice ?? 0,
+				returnPrice: monitor.returnPrice ?? 0,
+				time: monitor.triggerTime ?? Date.now()
+			}, ...list].slice(0, 50));
+			fireAlarm(monitor);
+		}
+	}, [quotes]);
+	async function startMonitoring() {
+		setFormError(null);
+		const level = parsePrice(levelText, symbol);
+		const confirmDistance = parsePrice(confirmText, symbol);
+		const returnDistance = returnText.trim() === "" ? null : parsePrice(returnText, symbol);
+		if (level == null || confirmDistance == null || returnDistance == null) {
+			setFormError("Enter the level and both distances as positive numbers.");
+			return;
+		}
+		const invalid = validateFakeoutInput({
+			level,
+			confirmDistance,
+			returnDistance
+		});
+		if (invalid) {
+			setFormError(invalid);
+			return;
+		}
+		if (monitorsRef.current.length >= 8) {
+			setFormError(`Up to 8 monitors at once — remove one first.`);
+			return;
+		}
+		await unlockAudio();
+		if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission();
+		const monitor = {
+			id: crypto.randomUUID(),
+			symbol,
+			level,
+			direction,
+			confirmDistance,
+			returnDistance,
+			status: "waiting",
+			paused: false,
+			breakoutPrice: null,
+			breakoutTime: null,
+			returnPrice: null,
+			triggerTime: null
+		};
+		setMonitors((list) => [monitor, ...list]);
+	}
+	function togglePause(monitor) {
+		setMonitors((list) => list.map((m) => m.id === monitor.id ? {
+			...m,
+			paused: !m.paused
+		} : m));
+	}
+	function resetMonitor(monitor) {
+		silenceAlarm(monitor.id);
+		setMonitors((list) => list.map((m) => m.id === monitor.id ? rearmFakeout(m) : m));
+	}
+	function removeMonitor(monitor) {
+		silenceAlarm(monitor.id);
+		setMonitors((list) => list.filter((m) => m.id !== monitor.id));
+	}
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("main", {
+		className: "mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 px-4 py-5 sm:px-6 lg:py-6",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "flex flex-col gap-4 rounded-2xl border border-line bg-panel p-4",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", {
+						className: "flex flex-col gap-1",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
+							className: "text-2xl font-semibold text-paper",
+							children: "Anti-Fakeout Alert"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+							className: "text-sm text-fog",
+							children: [
+								"Detects ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-copper",
+									children: "possible"
+								}),
+								" false breakouts: price confirms a breakout past your level, then snaps back across it. A monitoring aid —",
+								" ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-heat",
+									children: "not a guaranteed trading signal"
+								}),
+								". Alerts ring only while this page is open."
+							]
+						})]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "grid gap-4 sm:grid-cols-2 lg:grid-cols-5",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+								className: "flex flex-col gap-2 text-sm text-fog",
+								children: ["Market", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("select", {
+									value: symbol,
+									onChange: (e) => setSymbol(e.target.value),
+									className: inputCls,
+									children: MARKETS.map((m) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("option", {
+										value: m.symbol,
+										children: [
+											m.name,
+											" · ",
+											m.short
+										]
+									}, m.symbol))
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+								className: "flex flex-col gap-2 text-sm text-fog",
+								children: ["Key price level", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+									value: levelText,
+									onChange: (e) => setLevelText(e.target.value),
+									inputMode: "decimal",
+									placeholder: "e.g. 4400",
+									className: `font-mono ${inputCls}`
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+								className: "flex flex-col gap-2 text-sm text-fog",
+								children: ["Direction", /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+									value: direction,
+									onChange: (e) => setDirection(e.target.value),
+									className: inputCls,
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+										value: "up",
+										children: "Breakout above"
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+										value: "down",
+										children: "Breakout below"
+									})]
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+								className: "flex flex-col gap-2 text-sm text-fog",
+								children: ["Confirmation distance", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+									value: confirmText,
+									onChange: (e) => setConfirmText(e.target.value),
+									inputMode: "decimal",
+									placeholder: "e.g. 2.00",
+									className: `font-mono ${inputCls}`
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+								className: "flex flex-col gap-2 text-sm text-fog",
+								children: ["Return distance", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+									value: returnText,
+									onChange: (e) => setReturnText(e.target.value),
+									inputMode: "decimal",
+									placeholder: "e.g. 1.00",
+									className: `font-mono ${inputCls}`
+								})]
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex flex-col gap-2",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: () => void startMonitoring(),
+								className: "h-12 w-full rounded-xl bg-copper font-semibold text-copper-ink sm:w-64",
+								children: "Start Monitoring"
+							}),
+							formError ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "text-sm text-heat",
+								children: formError
+							}) : null,
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "text-xs text-fog",
+								children: "A plain touch of the level never counts — the price must first move the confirmation distance beyond it. If it then comes back across the level by the return distance, the alarm fires once."
+							})
+						]
+					})
+				]
+			}),
+			monitors.length ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("section", {
+				className: "grid gap-4 sm:grid-cols-2",
+				children: monitors.map((monitor) => {
+					const quote = quotes[monitor.symbol];
+					const ringing = alarmId === monitor.id;
+					return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+						className: `flex flex-col gap-3 rounded-2xl border p-4 ${monitor.status === "triggered" ? "animate-pulse border-heat bg-raised" : "border-line bg-panel"}`,
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-start justify-between gap-2",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "min-w-0",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+										className: "text-sm text-fog",
+										children: [
+											marketBySymbol(monitor.symbol).name,
+											" ·",
+											" ",
+											fakeoutDirectionLabel(monitor.direction)
+										]
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "font-mono text-2xl tracking-tight text-paper",
+										children: formatPrice(monitor.level, monitor.symbol)
+									})]
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+									className: `shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeCls(monitor.status)}`,
+									children: [fakeoutStatusLabel(monitor.status), monitor.paused && monitor.status !== "triggered" ? " · paused" : ""]
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+								className: "font-mono text-sm text-fog",
+								"aria-live": "polite",
+								children: [
+									quote?.tick ? `Now ${formatPrice(quote.tick.price, monitor.symbol)}` : "Waiting for price…",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `ml-2 inline-block h-2 w-2 rounded-full ${quote?.status === "live" ? "bg-mint" : quote?.status === "offline" ? "bg-heat" : "bg-fog"}` }),
+									quote?.status === "closed" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: "ml-2",
+										children: "market closed"
+									}) : null
+								]
+							}),
+							monitor.status === "confirmed" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+								className: "text-sm text-copper",
+								children: [
+									"Broke out at ",
+									formatPrice(monitor.breakoutPrice ?? 0, monitor.symbol),
+									" ·",
+									" ",
+									fmtTime(monitor.breakoutTime),
+									" — watching for a return…"
+								]
+							}) : null,
+							monitor.status === "triggered" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex flex-col gap-1 text-sm",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "flex items-center gap-2 font-semibold text-heat",
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)(BellRing, { className: "h-4 w-4" }),
+										" ",
+										fakeoutMessage(monitor)
+									]
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "font-mono text-xs text-fog",
+									children: [
+										"Breakout ",
+										formatPrice(monitor.breakoutPrice ?? 0, monitor.symbol),
+										" at",
+										" ",
+										fmtTime(monitor.breakoutTime),
+										" → return",
+										" ",
+										formatPrice(monitor.returnPrice ?? 0, monitor.symbol),
+										" at",
+										" ",
+										fmtTime(monitor.triggerTime)
+									]
+								})]
+							}) : null,
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex flex-wrap gap-2",
+								children: [
+									monitor.status !== "triggered" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+										type: "button",
+										onClick: () => togglePause(monitor),
+										className: "flex h-10 items-center gap-1 rounded-xl bg-raised px-3 text-sm text-paper",
+										children: [monitor.paused ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Play, { className: "h-4 w-4" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Pause, { className: "h-4 w-4" }), monitor.paused ? "Resume" : "Pause"]
+									}) : null,
+									ringing ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+										type: "button",
+										onClick: () => silenceAlarm(monitor.id),
+										className: "flex h-10 items-center gap-1 rounded-xl bg-heat px-3 text-sm font-semibold text-heat-ink",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Check, { className: "h-4 w-4" }), " Acknowledge"]
+									}) : null,
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+										type: "button",
+										onClick: () => resetMonitor(monitor),
+										className: "flex h-10 items-center gap-1 rounded-xl bg-raised px-3 text-sm text-paper",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RotateCcw, { className: "h-4 w-4" }), " Reset"]
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+										type: "button",
+										onClick: () => removeMonitor(monitor),
+										className: "flex h-10 items-center gap-1 rounded-xl px-3 text-sm text-fog",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Trash2, { className: "h-4 w-4" }), " Remove"]
+									})
+								]
+							})
+						]
+					}, monitor.id);
+				})
+			}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+				className: "rounded-2xl border border-dashed border-line p-4 text-sm text-fog",
+				children: [
+					"No Anti-Fakeout monitors yet. Configure one above and press Start Monitoring — up to",
+					" ",
+					8,
+					" can run at once, for the same or different markets."
+				]
+			}),
+			history.length ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "flex flex-col gap-2 rounded-2xl border border-line bg-panel p-4",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-center justify-between",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+						className: "font-semibold text-paper",
+						children: "Alert history"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						onClick: () => setHistory([]),
+						className: "text-sm text-copper hover:underline",
+						children: "Clear history"
+					})]
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", {
+					className: "flex flex-col gap-1 text-sm text-fog",
+					children: history.map((event) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", {
+						className: "font-mono text-xs",
+						children: [
+							new Date(event.time).toLocaleString(),
+							" · ",
+							event.symbol,
+							" ",
+							fakeoutDirectionLabel(event.direction),
+							" ",
+							formatPrice(event.level, event.symbol),
+							" · breakout ",
+							formatPrice(event.breakoutPrice, event.symbol),
+							" → return",
+							" ",
+							formatPrice(event.returnPrice, event.symbol)
+						]
+					}, event.id))
+				})]
+			}) : null,
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "rounded-2xl border border-line bg-panel p-4 text-sm text-fog",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+						className: "mb-2 font-semibold text-paper",
+						children: "How detection works"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
+						className: "list-decimal space-y-1 pl-5",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-paper",
+								children: "Waiting for Breakout"
+							}), " — the price must move at least the confirmation distance past your level. Touching the level is never enough."] }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-paper",
+								children: "Breakout Confirmed"
+							}), " — the breakout is recorded and the monitor watches for a snap-back."] }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-paper",
+								children: "Possible Fakeout Detected"
+							}), " — price returns across the level by the return distance. The alarm rings once until you acknowledge or reset."] }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-paper",
+									children: "Reset"
+								}),
+								" re-arms the same settings for the next breakout; ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-paper",
+									children: "Pause"
+								}),
+								" freezes a monitor without losing its state."
+							] })
+						]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "mt-2 text-xs",
+						children: "Quotes come from the same live feed as the main desk (Coinbase for crypto, Yahoo Finance for forex/gold). Monitors run in this browser tab — they cannot run after the tab is closed."
+					})
+				]
+			})
+		]
+	});
 }
 var INTERVAL_SECONDS = {
 	"1m": 60,
@@ -365,159 +1223,6 @@ function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus }) {
 		]
 	});
 }
-var ctx = null;
-var activeStop = null;
-var master = null;
-var wakeLock = null;
-function context() {
-	if (!ctx) {
-		const Ctx = window.AudioContext || window.webkitAudioContext;
-		if (!Ctx) throw new Error("Audio isn't available in this browser.");
-		ctx = new Ctx();
-	}
-	return ctx;
-}
-async function unlockAudio() {
-	try {
-		const audio = context();
-		if (audio.state === "suspended") await audio.resume();
-		return audio.state === "running";
-	} catch {
-		return false;
-	}
-}
-function clampVolume(volume) {
-	if (!Number.isFinite(volume)) return .8;
-	return Math.min(1, Math.max(.05, volume));
-}
-function tone(audio, dest, freq, start, duration, gain, type = "sine") {
-	const osc = audio.createOscillator();
-	const amp = audio.createGain();
-	osc.type = type;
-	osc.frequency.setValueAtTime(freq, start);
-	amp.gain.setValueAtTime(1e-4, start);
-	amp.gain.exponentialRampToValueAtTime(Math.max(gain, 1e-4), start + .02);
-	amp.gain.exponentialRampToValueAtTime(1e-4, start + duration);
-	osc.connect(amp);
-	amp.connect(dest);
-	osc.start(start);
-	osc.stop(start + duration + .02);
-}
-function playPhone(audio, dest, t) {
-	[
-		659.25,
-		783.99,
-		659.25,
-		987.77,
-		783.99,
-		659.25
-	].forEach((freq, index) => {
-		tone(audio, dest, freq, t + index * .16, .22, .22);
-		tone(audio, dest, freq / 2, t + index * .16, .22, .05);
-	});
-}
-function playBell(audio, dest, t) {
-	tone(audio, dest, 880, t, .7, .24);
-	tone(audio, dest, 1320, t, .4, .08);
-	tone(audio, dest, 660, t + .45, .8, .16);
-}
-function playSiren(audio, dest, t) {
-	const osc = audio.createOscillator();
-	const amp = audio.createGain();
-	osc.type = "triangle";
-	osc.frequency.setValueAtTime(440, t);
-	osc.frequency.linearRampToValueAtTime(880, t + .35);
-	osc.frequency.linearRampToValueAtTime(440, t + .7);
-	osc.frequency.linearRampToValueAtTime(880, t + 1.02);
-	amp.gain.setValueAtTime(1e-4, t);
-	amp.gain.exponentialRampToValueAtTime(.22, t + .04);
-	amp.gain.exponentialRampToValueAtTime(1e-4, t + 1.05);
-	osc.connect(amp);
-	amp.connect(dest);
-	osc.start(t);
-	osc.stop(t + 1.08);
-}
-function startRingtone(kind, volume) {
-	activeStop?.();
-	const audio = context();
-	const gain = audio.createGain();
-	gain.gain.value = clampVolume(volume);
-	gain.connect(audio.destination);
-	master = gain;
-	let stopped = false;
-	let timer = 0;
-	const loop = () => {
-		if (stopped) return;
-		const t = audio.currentTime + .03;
-		if (kind === "phone") playPhone(audio, gain, t);
-		else if (kind === "bell") playBell(audio, gain, t);
-		else playSiren(audio, gain, t);
-		const wait = kind === "siren" ? 1200 : kind === "bell" ? 1700 : 1500;
-		timer = window.setTimeout(loop, wait);
-	};
-	const stop = () => {
-		if (stopped) return;
-		stopped = true;
-		window.clearTimeout(timer);
-		const now = audio.currentTime;
-		gain.gain.cancelScheduledValues(now);
-		gain.gain.setTargetAtTime(1e-4, now, .03);
-		window.setTimeout(() => {
-			gain.disconnect();
-			if (master === gain) master = null;
-		}, 180);
-		if (activeStop === stop) activeStop = null;
-	};
-	activeStop = stop;
-	loop();
-	return stop;
-}
-var customAudio = null;
-/**
-* Loop a user-imported sound (data URL from an <input type="file">).
-* Returns a stop function with the same contract as startRingtone.
-*/
-function startCustomRingtone(dataUrl, volume) {
-	activeStop?.();
-	const audio = new Audio(dataUrl);
-	audio.loop = true;
-	audio.volume = clampVolume(volume);
-	customAudio = audio;
-	audio.play().catch(() => {});
-	let stopped = false;
-	const stop = () => {
-		if (stopped) return;
-		stopped = true;
-		audio.pause();
-		audio.removeAttribute("src");
-		if (customAudio === audio) customAudio = null;
-		if (activeStop === stop) activeStop = null;
-	};
-	activeStop = stop;
-	return stop;
-}
-function setRingVolume(volume) {
-	if (customAudio) customAudio.volume = clampVolume(volume);
-	if (!master || !ctx) return;
-	master.gain.setTargetAtTime(clampVolume(volume), ctx.currentTime, .02);
-}
-function stopRingtone() {
-	activeStop?.();
-}
-async function holdAwake(on) {
-	if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
-	try {
-		if (on) {
-			if (wakeLock && !wakeLock.released) return;
-			wakeLock = await navigator.wakeLock.request("screen");
-			return;
-		}
-		await wakeLock?.release();
-		wakeLock = null;
-	} catch {
-		wakeLock = null;
-	}
-}
 var STORAGE_KEY = "linebell.v1";
 function loadSaved() {
 	try {
@@ -559,7 +1264,27 @@ function snap(tick) {
 	};
 }
 function LinebellApp() {
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Desk, {});
+	const [tab, setTab] = (0, import_react.useState)("alerts");
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "mx-auto flex min-h-screen w-full max-w-6xl flex-col",
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("nav", {
+			className: "flex gap-2 px-4 pt-5 sm:px-6 lg:pt-6",
+			"aria-label": "Sections",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				"aria-pressed": tab === "alerts",
+				onClick: () => setTab("alerts"),
+				className: `h-11 rounded-xl px-5 font-medium ${tab === "alerts" ? "bg-paper text-ink" : "bg-raised text-fog"}`,
+				children: "Price Alerts"
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				"aria-pressed": tab === "fakeout",
+				onClick: () => setTab("fakeout"),
+				className: `h-11 rounded-xl px-5 font-medium ${tab === "fakeout" ? "bg-paper text-ink" : "bg-raised text-fog"}`,
+				children: "Anti-Fakeout"
+			})]
+		}), tab === "alerts" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Desk, {}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(FakeoutPanel, {})]
+	});
 }
 function Desk() {
 	const [symbol, setSymbol] = (0, import_react.useState)("BTCUSD");

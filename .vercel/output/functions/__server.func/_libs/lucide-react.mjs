@@ -119,6 +119,60 @@ var Bell = createLucideIcon("bell", [["path", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
+var Check = createLucideIcon("check", [["path", {
+	d: "M20 6 9 17l-5-5",
+	key: "1gmf2c"
+}]]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var Pause = createLucideIcon("pause", [["rect", {
+	x: "14",
+	y: "4",
+	width: "4",
+	height: "16",
+	rx: "1",
+	key: "zuxfzm"
+}], ["rect", {
+	x: "6",
+	y: "4",
+	width: "4",
+	height: "16",
+	rx: "1",
+	key: "1okwgv"
+}]]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var Play = createLucideIcon("play", [["polygon", {
+	points: "6 3 20 12 6 21 6 3",
+	key: "1oa8hb"
+}]]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var RotateCcw = createLucideIcon("rotate-ccw", [["path", {
+	d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8",
+	key: "1357e3"
+}], ["path", {
+	d: "M3 3v5h5",
+	key: "1xhq8a"
+}]]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
 var Trash2 = createLucideIcon("trash-2", [
 	["path", {
 		d: "M3 6h18",
@@ -168,4 +222,4 @@ var TriangleAlert = createLucideIcon("triangle-alert", [
 	}]
 ]);
 //#endregion
-export { BellRing as i, Trash2 as n, Bell as r, TriangleAlert as t };
+export { Pause as a, BellRing as c, Play as i, Trash2 as n, Check as o, RotateCcw as r, Bell as s, TriangleAlert as t };

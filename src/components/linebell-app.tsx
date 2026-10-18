@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, BellRing, Trash2 } from "lucide-react";
+import { FakeoutPanel } from "@/components/fakeout-panel";
 import { MarketChart, type FeedStatus, type LineMark } from "@/components/market-chart";
 import {
   INTERVALS,
@@ -88,7 +89,34 @@ function snap(tick: { high: number; low: number; close: number }): BarSnap {
 }
 
 export function LinebellApp() {
-  return <Desk />;
+  const [tab, setTab] = useState<"alerts" | "fakeout">("alerts");
+  return (
+    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col">
+      <nav className="flex gap-2 px-4 pt-5 sm:px-6 lg:pt-6" aria-label="Sections">
+        <button
+          type="button"
+          aria-pressed={tab === "alerts"}
+          onClick={() => setTab("alerts")}
+          className={`h-11 rounded-xl px-5 font-medium ${
+            tab === "alerts" ? "bg-paper text-ink" : "bg-raised text-fog"
+          }`}
+        >
+          Price Alerts
+        </button>
+        <button
+          type="button"
+          aria-pressed={tab === "fakeout"}
+          onClick={() => setTab("fakeout")}
+          className={`h-11 rounded-xl px-5 font-medium ${
+            tab === "fakeout" ? "bg-paper text-ink" : "bg-raised text-fog"
+          }`}
+        >
+          Anti-Fakeout
+        </button>
+      </nav>
+      {tab === "alerts" ? <Desk /> : <FakeoutPanel />}
+    </div>
+  );
 }
 
 function Desk() {
