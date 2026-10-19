@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BellRing, Trash2 } from "lucide-react";
+import { Bell, BellRing, Info, Trash2 } from "lucide-react";
 import { FakeoutPanel } from "@/components/fakeout-panel";
 import { MarketChart, type FeedStatus, type LineMark } from "@/components/market-chart";
 import {
@@ -41,6 +41,24 @@ type Saved = {
   volume: number;
   customTone: { url: string; name: string } | null;
 };
+
+const CONDITION_OPTIONS: Array<{ value: Condition; label: string; description: string }> = [
+  {
+    value: "touch",
+    label: "Touches the Line",
+    description: "Alerts when the price reaches your selected level.",
+  },
+  {
+    value: "cross-up",
+    label: "Crosses Above",
+    description: "Alerts when the price moves from below to above your level.",
+  },
+  {
+    value: "cross-down",
+    label: "Crosses Below",
+    description: "Alerts when the price moves from above to below your level.",
+  },
+];
 
 function loadSaved(): Saved | null {
   try {
@@ -123,6 +141,7 @@ function Desk() {
   const [symbol, setSymbol] = useState<MarketSymbol>("BTCUSD");
   const [interval, setInterval] = useState<Interval>("1m");
   const [condition, setCondition] = useState<Condition>("touch");
+  const [conditionInfo, setConditionInfo] = useState<Condition | null>(null);
   const [tone, setTone] = useState<Tone>("phone");
   const [repeat, setRepeat] = useState(true);
   const [volume, setVolume] = useState(0.8);
@@ -612,18 +631,57 @@ function Desk() {
           </div>
         </div>
 
-        <label className="flex flex-col gap-2 text-sm text-fog">
-          Ring when price
-          <select
-            value={condition}
-            onChange={(event) => setCondition(event.target.value as Condition)}
-            className="h-12 rounded-xl border border-line bg-ink px-3 text-paper outline-none focus:border-copper"
-          >
-            <option value="touch">Touches the line</option>
-            <option value="cross-up">Crosses above</option>
-            <option value="cross-down">Crosses below</option>
-          </select>
-        </label>
+        <fieldset className="flex flex-col gap-2 text-sm text-fog">
+          <legend>Ring when price</legend>
+          <div className="flex flex-col gap-1">
+            {CONDITION_OPTIONS.map((option) => {
+              const infoOpen = conditionInfo === option.value;
+              return (
+                <div
+                  key={option.value}
+                  className={`relative flex min-h-12 items-center justify-between gap-2 rounded-xl border px-3 ${
+                    condition === option.value
+                      ? "border-copper bg-raised text-paper"
+                      : "border-line bg-ink text-paper"
+                  }`}
+                >
+                  <label className="flex min-h-12 min-w-0 flex-1 cursor-pointer items-center gap-3">
+                    <input
+                      type="radio"
+                      name="price-condition"
+                      value={option.value}
+                      checked={condition === option.value}
+                      onChange={() => setCondition(option.value)}
+                      className="size-4 shrink-0 accent-copper"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                  <button
+                    type="button"
+                    aria-label={`About ${option.label}`}
+                    aria-expanded={infoOpen}
+                    aria-describedby={infoOpen ? `condition-info-${option.value}` : undefined}
+                    onClick={() =>
+                      setConditionInfo((current) => (current === option.value ? null : option.value))
+                    }
+                    className="group relative flex size-10 shrink-0 items-center justify-center rounded-full text-fog hover:bg-panel hover:text-copper focus-visible:outline focus-visible:outline-2 focus-visible:outline-copper"
+                  >
+                    <Info size={17} aria-hidden="true" />
+                    <span
+                      id={`condition-info-${option.value}`}
+                      role="tooltip"
+                      className={`invisible absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-line bg-panel p-3 text-left text-xs leading-relaxed text-paper shadow-xl group-hover:visible group-focus-within:visible ${
+                        infoOpen ? "visible" : ""
+                      }`}
+                    >
+                      {option.description}
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </fieldset>
 
         <label className="flex flex-col gap-2 text-sm text-fog">
           Sound
