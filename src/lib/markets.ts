@@ -21,7 +21,7 @@ const FOREX = [
   { symbol: "AUDUSD", name: "Aussie", short: "AUDUSD", venue: "yahoo", yahoo: "AUDUSD=X", digits: 5 },
   { symbol: "USDCAD", name: "Canadian", short: "USDCAD", venue: "yahoo", yahoo: "USDCAD=X", digits: 5 },
   { symbol: "NZDUSD", name: "NZ dollar", short: "NZDUSD", venue: "yahoo", yahoo: "NZDUSD=X", digits: 5 },
-  { symbol: "XAUUSD", name: "Gold", short: "GOLD", venue: "yahoo", yahoo: "GC=F", digits: 2 },
+  { symbol: "XAUUSD", name: "Gold", short: "GOLD", venue: "yahoo", yahoo: "XAUUSD=X", digits: 2 },
 ] as const;
 
 export const MARKETS = [...CRYPTO, ...FOREX];

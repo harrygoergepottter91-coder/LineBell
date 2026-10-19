@@ -106,10 +106,15 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
     let dead = false;
     let chart: IChartApi | null = null;
     let socket: WebSocket | null = null;
+    let visibilityHandler: (() => void) | null = null;
     let poll: number | null = null;
     let reconnectTimer: number | null = null;
     let reconnectAttempt = 0;
     let socketOpen = false;
+    let pageVisible = !document.hidden;
+    let historyRefreshInFlight = false;
+    let pollInFlight = false;
+    let loadVersion = 0;
     let hasData = false;
     let marketClosed = false;
     let lastSeriesTime = 0;
@@ -176,11 +181,13 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
       });
 
       const load = async (full: boolean) => {
+        const version = full ? ++loadVersion : loadVersion;
         const res = await fetch(apiPath(`/api/market?symbol=${symbol}&interval=${interval}`), {
           cache: "no-store",
         });
         if (!res.ok) throw new Error(`feed returned HTTP ${res.status}`);
         const body = (await res.json()) as FeedBody;
+        if (dead || version !== loadVersion) return;
         const uniqueCandles = new Map<number, Candle>();
         for (const candle of body.candles ?? []) {
           if (
@@ -199,7 +206,7 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
         }
         const candles = [...uniqueCandles.values()].sort((left, right) => left.time - right.time);
         if (!candles.length) throw new Error("empty");
-        if (dead) return;
+        if (dead || version !== loadVersion) return;
         const last = candles[candles.length - 1]!;
         if (full || !hasData) {
           series.setData(
@@ -268,9 +275,10 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
       }
       if (dead) return;
 
+      pageVisible = !document.hidden;
       const product = coinbaseProductId(symbol);
       const connect = () => {
-        if (dead || !product) return;
+        if (dead || !pageVisible || !product) return;
         try {
           const ws = new WebSocket("wss://ws-feed.exchange.coinbase.com");
           socket = ws;
@@ -306,7 +314,7 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
             ws.close();
           };
           ws.onmessage = (event) => {
-            if (dead) return;
+            if (dead || !pageVisible) return;
             let message: unknown;
             try {
               message = JSON.parse(String(event.data));
@@ -372,11 +380,46 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
       };
       if (isCoinbase(symbol)) connect();
 
+      const onVisibilityChange = () => {
+        if (document.hidden) {
+          pageVisible = false;
+          if (reconnectTimer !== null) {
+            window.clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          const hiddenSocket = socket;
+          socket = null;
+          socketOpen = false;
+          hiddenSocket?.close();
+          return;
+        }
+
+        pageVisible = true;
+        if (historyRefreshInFlight) return;
+        historyRefreshInFlight = true;
+        void load(true)
+          .catch((error) => {
+            console.warn(`[market] Resume history refresh failed for ${symbol}`, error);
+            if (!dead && !socketOpen) {
+              onStatusRef.current(hasData ? (marketClosed ? "closed" : "live") : "offline");
+            }
+          })
+          .finally(() => {
+            historyRefreshInFlight = false;
+            if (!dead && pageVisible && isCoinbase(symbol) && !socketOpen) connect();
+          });
+      };
+      visibilityHandler = onVisibilityChange;
+      document.addEventListener("visibilitychange", onVisibilityChange);
+
       poll = window.setInterval(() => {
-        if (dead || socketOpen) return;
+        if (dead || document.hidden || socketOpen || historyRefreshInFlight || pollInFlight) return;
+        pollInFlight = true;
         void load(false).catch((error) => {
           console.warn(`[market] Polling feed failed for ${symbol}`, error);
           if (!dead && !socketOpen) onStatusRef.current(hasData ? (marketClosed ? "closed" : "live") : "offline");
+        }).finally(() => {
+          pollInFlight = false;
         });
       }, product ? 4000 : 5000);
     })().catch((error) => {
@@ -391,6 +434,9 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
       dead = true;
       if (poll !== null) window.clearInterval(poll);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (visibilityHandler) {
+        document.removeEventListener("visibilitychange", visibilityHandler);
+      }
       socket?.close();
       priceLinesRef.current = [];
       seriesRef.current = null;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { coinbaseProductId, isCoinbase, isSymbol, migrateSymbol } from "./markets.ts";
+import { coinbaseProductId, isCoinbase, isSymbol, marketBySymbol, migrateSymbol } from "./markets.ts";
 
 test("crypto symbols map to Coinbase USD products", () => {
   const products = {
@@ -21,6 +21,10 @@ test("crypto symbols map to Coinbase USD products", () => {
   }
   assert.equal(coinbaseProductId("XAUUSD"), null);
   assert.equal(isCoinbase("EURUSD"), false);
+});
+
+test("gold uses the Yahoo spot XAU/USD symbol", () => {
+  assert.equal(marketBySymbol("XAUUSD").yahoo, "XAUUSD=X");
 });
 
 test("legacy USDT identifiers migrate to their USD symbols", () => {
