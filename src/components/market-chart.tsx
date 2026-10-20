@@ -36,6 +36,7 @@ type FeedBody = {
   closed?: boolean;
   price?: number;
   quoteTime?: number;
+  stale?: boolean;
 };
 
 const INTERVAL_SECONDS: Record<Interval, number> = {
@@ -223,13 +224,14 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
           paintLines();
         }
         hasData = true;
-        marketClosed = Boolean(body.closed);
+        marketClosed = Boolean(body.closed || body.stale);
         lastChange = Number.isFinite(body.change) ? (body.change ?? null) : null;
         const price = Number(body.price);
         const quoteTime = Number(body.quoteTime);
         let current = latestBar ?? last;
         if (
           !socketOpen &&
+          !body.stale &&
           !marketClosed &&
           Number.isFinite(price) &&
           price > 0 &&
@@ -258,9 +260,11 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
             lastSeriesTime = current.time;
           }
         }
-        if (full || !socketOpen) publish(current, lastChange, Number.isFinite(price) && price > 0 ? price : current.close);
+        if ((full || !socketOpen) && !body.stale) {
+          publish(current, lastChange, Number.isFinite(price) && price > 0 ? price : current.close);
+        }
         setFeed("ready");
-        onStatusRef.current(marketClosed ? "closed" : "live");
+        onStatusRef.current(body.stale ? "offline" : marketClosed ? "closed" : "live");
       };
 
       try {

@@ -21,7 +21,7 @@ const FOREX = [
   { symbol: "AUDUSD", name: "Aussie", short: "AUDUSD", venue: "yahoo", yahoo: "AUDUSD=X", digits: 5 },
   { symbol: "USDCAD", name: "Canadian", short: "USDCAD", venue: "yahoo", yahoo: "USDCAD=X", digits: 5 },
   { symbol: "NZDUSD", name: "NZ dollar", short: "NZDUSD", venue: "yahoo", yahoo: "NZDUSD=X", digits: 5 },
-  { symbol: "XAUUSD", name: "Gold", short: "GOLD", venue: "yahoo", yahoo: "XAUUSD=X", digits: 2 },
+  { symbol: "XAUUSD", name: "Gold", short: "GOLD", venue: "gold-api", digits: 2 },
 ] as const;
 
 export const MARKETS = [...CRYPTO, ...FOREX];
@@ -80,6 +80,19 @@ const TONES: Tone[] = ["phone", "bell", "siren"];
 
 export function isSymbol(value: string): value is MarketSymbol {
   return MARKETS.some((market) => market.symbol === value);
+}
+
+export function normalizeMarketSymbol(value: unknown): MarketSymbol | null {
+  if (typeof value !== "string") return null;
+  const symbol = value.trim().toUpperCase();
+  if (symbol === "GOLD") return "XAUUSD";
+  return isSymbol(symbol) ? symbol : null;
+}
+
+export function yahooTickerForSymbol(symbol: string): string | null {
+  const market = MARKETS.find((item) => item.symbol === symbol);
+  if (market?.venue !== "yahoo") return null;
+  return market.yahoo.endsWith("=X") ? market.yahoo : `${symbol}=X`;
 }
 
 export function migrateSymbol(value: unknown): MarketSymbol | null {

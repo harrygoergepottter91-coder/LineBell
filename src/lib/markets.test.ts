@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { coinbaseProductId, isCoinbase, isSymbol, marketBySymbol, migrateSymbol } from "./markets.ts";
+import {
+  coinbaseProductId,
+  isCoinbase,
+  isSymbol,
+  marketBySymbol,
+  migrateSymbol,
+  normalizeMarketSymbol,
+  yahooTickerForSymbol,
+} from "./markets.ts";
 
 test("crypto symbols map to Coinbase USD products", () => {
   const products = {
@@ -23,8 +31,23 @@ test("crypto symbols map to Coinbase USD products", () => {
   assert.equal(isCoinbase("EURUSD"), false);
 });
 
-test("gold uses the Yahoo spot XAU/USD symbol", () => {
-  assert.equal(marketBySymbol("XAUUSD").yahoo, "XAUUSD=X");
+test("gold uses a spot provider instead of a Yahoo futures ticker", () => {
+  assert.equal(marketBySymbol("XAUUSD").venue, "gold-api");
+  assert.equal(yahooTickerForSymbol("XAUUSD"), null);
+});
+
+test("Yahoo forex symbols use the required =X suffix", () => {
+  const pairs = ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDJPY", "USDCAD", "USDCHF"];
+
+  for (const pair of pairs) {
+    assert.equal(yahooTickerForSymbol(pair), `${pair}=X`);
+  }
+});
+
+test("gold aliases normalize to spot gold", () => {
+  assert.equal(normalizeMarketSymbol("GOLD"), "XAUUSD");
+  assert.equal(normalizeMarketSymbol(" xauusd "), "XAUUSD");
+  assert.equal(yahooTickerForSymbol("XAUUSD"), null);
 });
 
 test("legacy USDT identifiers migrate to their USD symbols", () => {

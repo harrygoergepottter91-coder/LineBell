@@ -571,7 +571,7 @@ function Desk() {
         />
         <p className="text-sm text-fog">
           Tap the chart to drop a horizontal price line. Green candles are up, red candles are down.
-          {market.symbol === "XAUUSD" ? " Gold is the spot price." : ""}
+          {market.symbol === "XAUUSD" ? " Gold uses live spot pricing." : ""}
           {status === "closed" ? " This market is closed. The ring waits until price moves again." : ""}
         </p>
         {distance != null && quote ? (
