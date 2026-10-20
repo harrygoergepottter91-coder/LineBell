@@ -89,6 +89,10 @@ export function normalizeMarketSymbol(value: unknown): MarketSymbol | null {
   return isSymbol(symbol) ? symbol : null;
 }
 
+export function normalizeUnixTimestamp(value: number): number {
+  return Math.floor(value > 1_000_000_000_000 ? value / 1000 : value);
+}
+
 export function yahooTickerForSymbol(symbol: string): string | null {
   const market = MARKETS.find((item) => item.symbol === symbol);
   if (market?.venue !== "yahoo") return null;

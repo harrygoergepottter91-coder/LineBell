@@ -504,7 +504,20 @@ function Desk() {
                 );
               })}
             </div>
-            <p className="text-sm text-fog">Forex and gold</p>
+            <p className="text-sm text-fog">Spot gold</p>
+            <div>
+              <button
+                type="button"
+                aria-pressed={symbol === "XAUUSD"}
+                onClick={() => chooseMarket("XAUUSD")}
+                className={`h-11 rounded-full px-4 font-medium ${
+                  symbol === "XAUUSD" ? "bg-paper text-ink" : "bg-raised text-fog"
+                }`}
+              >
+                XAUUSD
+              </button>
+            </div>
+            <p className="text-sm text-fog">Forex</p>
             <div className="flex gap-2 overflow-x-auto pb-1">
               {MARKETS.filter((item) => item.venue === "yahoo").map((item) => {
                 const active = item.symbol === symbol;
@@ -571,7 +584,9 @@ function Desk() {
         />
         <p className="text-sm text-fog">
           Tap the chart to drop a horizontal price line. Green candles are up, red candles are down.
-          {market.symbol === "XAUUSD" ? " Gold uses live spot pricing." : ""}
+          {market.symbol === "XAUUSD"
+            ? " Gold history uses daily spot references; the latest quote is live."
+            : ""}
           {status === "closed" ? " This market is closed. The ring waits until price moves again." : ""}
         </p>
         {distance != null && quote ? (

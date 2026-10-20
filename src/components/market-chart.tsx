@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { IChartApi, IPriceLine, ISeriesApi, LineStyle, UTCTimestamp } from "lightweight-charts";
 import { apiPath } from "@/lib/api-path";
-import { coinbaseProductId, isCoinbase, marketBySymbol, type Candle, type Interval } from "@/lib/markets";
+import {
+  coinbaseProductId,
+  isCoinbase,
+  marketBySymbol,
+  normalizeUnixTimestamp,
+  type Candle,
+  type Interval,
+} from "@/lib/markets";
 
 export type LineMark = {
   id: string;
@@ -70,7 +77,7 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
   const linesRef = useRef(lines);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
-  const [feed, setFeed] = useState<"loading" | "ready" | "error">("loading");
+  const [feed, setFeed] = useState<"loading" | "ready" | "error" | "empty">("loading");
   const [attempt, setAttempt] = useState(0);
 
   onTickRef.current = onTick;
@@ -191,9 +198,10 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
         if (dead || version !== loadVersion) return;
         const uniqueCandles = new Map<number, Candle>();
         for (const candle of body.candles ?? []) {
+          const time = normalizeUnixTimestamp(candle.time);
           if (
-            !Number.isInteger(candle.time) ||
-            candle.time <= 0 ||
+            !Number.isSafeInteger(time) ||
+            time <= 0 ||
             ![candle.open, candle.high, candle.low, candle.close].every(Number.isFinite) ||
             candle.open <= 0 ||
             candle.low <= 0 ||
@@ -203,10 +211,16 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
             console.warn(`[market] Ignoring malformed candle for ${symbol}`, candle);
             continue;
           }
-          uniqueCandles.set(candle.time, candle);
+          uniqueCandles.set(time, { ...candle, time });
         }
         const candles = [...uniqueCandles.values()].sort((left, right) => left.time - right.time);
-        if (!candles.length) throw new Error("empty");
+        if (!candles.length) {
+          if (!dead && version === loadVersion) {
+            setFeed(hasData ? "ready" : "empty");
+            onStatusRef.current("offline");
+          }
+          return;
+        }
         if (dead || version !== loadVersion) return;
         const last = candles[candles.length - 1]!;
         if (full || !hasData) {
@@ -219,6 +233,7 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
               close: candle.close,
             })),
           );
+          if (symbol === "XAUUSD") chart?.timeScale().fitContent();
           latestBar = last;
           lastSeriesTime = last.time;
           paintLines();
@@ -227,7 +242,7 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
         marketClosed = Boolean(body.closed || body.stale);
         lastChange = Number.isFinite(body.change) ? (body.change ?? null) : null;
         const price = Number(body.price);
-        const quoteTime = Number(body.quoteTime);
+        const quoteTime = normalizeUnixTimestamp(Number(body.quoteTime));
         let current = latestBar ?? last;
         if (
           !socketOpen &&
@@ -466,6 +481,11 @@ export function MarketChart({ symbol, interval, lines, onTick, onPick, onStatus 
           >
             Try again
           </button>
+        </div>
+      ) : null}
+      {feed === "empty" ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-panel px-6 text-center text-fog">
+          Market data is temporarily unavailable. Retrying…
         </div>
       ) : null}
     </div>

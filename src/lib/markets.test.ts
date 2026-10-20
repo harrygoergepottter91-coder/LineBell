@@ -7,6 +7,7 @@ import {
   marketBySymbol,
   migrateSymbol,
   normalizeMarketSymbol,
+  normalizeUnixTimestamp,
   yahooTickerForSymbol,
 } from "./markets.ts";
 
@@ -48,6 +49,11 @@ test("gold aliases normalize to spot gold", () => {
   assert.equal(normalizeMarketSymbol("GOLD"), "XAUUSD");
   assert.equal(normalizeMarketSymbol(" xauusd "), "XAUUSD");
   assert.equal(yahooTickerForSymbol("XAUUSD"), null);
+});
+
+test("chart timestamps are normalized to Unix seconds", () => {
+  assert.equal(normalizeUnixTimestamp(1_792_454_824), 1_792_454_824);
+  assert.equal(normalizeUnixTimestamp(1_792_454_824_000), 1_792_454_824);
 });
 
 test("legacy USDT identifiers migrate to their USD symbols", () => {

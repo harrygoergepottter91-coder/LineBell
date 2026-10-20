@@ -13,6 +13,34 @@ const SYMBOLS = new Set<string>(MARKETS.map((market) => market.symbol));
 const INTERVAL_SET = new Set<string>(INTERVALS);
 const COINBASE = "https://api.exchange.coinbase.com";
 const GOLD_SPOT = "https://api.gold-api.com/price/XAU";
+const GOLD_HISTORY = "https://api.fxratesapi.com/timeseries";
+const GOLD_HISTORY_DAYS = 180;
+const MIN_GOLD_HISTORY_BARS = 100;
+const TWELVE_DATA_TIME_SERIES = "https://api.twelvedata.com/time_series";
+const TWELVE_DATA_SYMBOLS: Record<string, string> = {
+  EURUSD: "EUR/USD",
+  GBPUSD: "GBP/USD",
+  AUDUSD: "AUD/USD",
+  NZDUSD: "NZD/USD",
+  USDJPY: "USD/JPY",
+  USDCAD: "USD/CAD",
+  USDCHF: "USD/CHF",
+  XAUUSD: "XAU/USD",
+};
+const TWELVE_DATA_INTERVALS: Record<Interval, string> = {
+  "1m": "1min",
+  "5m": "5min",
+  "15m": "15min",
+  "1h": "1h",
+};
+const MIN_FOREX_METAL_CANDLES = 2;
+const EXTERNAL_API_HOSTS = new Set([
+  "api.exchange.coinbase.com",
+  "api.gold-api.com",
+  "api.fxratesapi.com",
+  "api.twelvedata.com",
+  "query1.finance.yahoo.com",
+]);
 const YAHOO_INTERVALS: Record<Interval, string> = {
   "1m": "1m",
   "5m": "5m",
@@ -33,19 +61,37 @@ const PERIODS: Record<Interval, number> = {
 };
 
 const FETCH_ATTEMPTS = 2;
-const FETCH_TIMEOUT_MS = 10_000;
+const FETCH_TIMEOUT_MS = 5_000;
 const FEED_FALLBACK_LOG_INTERVAL_MS = 60_000;
 
 async function fetchJson(url: string): Promise<unknown> {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(url);
+  } catch {
+    throw new Error("market provider URL must be absolute");
+  }
+  if (
+    endpoint.protocol !== "https:" ||
+    !EXTERNAL_API_HOSTS.has(endpoint.hostname) ||
+    endpoint.username ||
+    endpoint.password
+  ) {
+    throw new Error("market provider URL is not an approved external HTTPS endpoint");
+  }
+
   for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
     let retryable = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      const response = await fetch(url, {
+      const response = await fetch(endpoint, {
+        keepalive: false,
         headers: {
           "user-agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: controller.signal,
       });
       if (!response.ok) {
         retryable = response.status === 429 || response.status >= 500;
@@ -55,6 +101,8 @@ async function fetchJson(url: string): Promise<unknown> {
     } catch (error) {
       if (!retryable || attempt === FETCH_ATTEMPTS) throw error;
       await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    } finally {
+      clearTimeout(timeout);
     }
   }
   throw new Error("upstream request exhausted retries");
@@ -80,6 +128,40 @@ const goldFeedCache = new Map<
   string,
   { feed: MarketFeed; lastFallbackWarningAt: number }
 >();
+const forexMetalFeedCache = new Map<
+  string,
+  { feed: MarketFeed; lastFallbackWarningAt: number }
+>();
+const forexMetalWarningTimes = new Map<string, number>();
+const lastGoodMarketFeeds = new Map<string, MarketFeed>();
+
+function unavailableMarketFeed(symbol: string, interval: Interval): MarketFeed & { stale: true } {
+  const key = `${symbol}:${interval}`;
+  const cached = lastGoodMarketFeeds.get(key);
+  const lastWarningAt = forexMetalWarningTimes.get(`${key}:network`) ?? 0;
+  if (Date.now() - lastWarningAt >= FEED_FALLBACK_LOG_INTERVAL_MS) {
+    console.warn(`[market] Providers unavailable for ${symbol}; using cached or empty candles`);
+    forexMetalWarningTimes.set(`${key}:network`, Date.now());
+  }
+  return cached
+    ? { ...cached, stale: true }
+    : {
+        candles: [],
+        price: 0,
+        quoteTime: 0,
+        change: null,
+        closed: true,
+        stale: true,
+      };
+}
+
+function warnForexMetalFallback(key: string, symbol: string, message: string) {
+  const now = Date.now();
+  const lastWarningAt = forexMetalWarningTimes.get(key) ?? 0;
+  if (now - lastWarningAt < FEED_FALLBACK_LOG_INTERVAL_MS) return;
+  console.warn(`[market] ${message} for ${symbol}`);
+  forexMetalWarningTimes.set(key, now);
+}
 
 async function coinbaseProductFeed(symbol: string, interval: Interval) {
   const product = coinbaseProductId(symbol);
@@ -155,33 +237,85 @@ async function coinbaseProductFeed(symbol: string, interval: Interval) {
 }
 
 async function fetchGoldSpotFeed(interval: Interval): Promise<MarketFeed> {
-  const payload = await fetchJson(GOLD_SPOT);
-  if (!isRecord(payload)) {
-    console.error("[market] Malformed Gold API response", payload);
+  const today = new Date();
+  const endDate = today.toISOString().slice(0, 10);
+  const startDate = new Date(
+    today.getTime() - GOLD_HISTORY_DAYS * 24 * 60 * 60 * 1000,
+  )
+    .toISOString()
+    .slice(0, 10);
+  const historyUrl = new URL(GOLD_HISTORY);
+  historyUrl.searchParams.set("base", "XAU");
+  historyUrl.searchParams.set("symbols", "USD");
+  historyUrl.searchParams.set("start_date", startDate);
+  historyUrl.searchParams.set("end_date", endDate);
+  const [spotPayload, historyPayload] = await Promise.all([
+    fetchJson(GOLD_SPOT),
+    fetchJson(historyUrl.toString()),
+  ]);
+  if (!isRecord(spotPayload)) {
+    console.error("[market] Malformed Gold API response", spotPayload);
     throw new Error("malformed Gold API response");
   }
 
-  const price = Number(payload.price);
-  const quoteTime = Date.parse(String(payload.updatedAt)) / 1000;
+  const price = Number(spotPayload.price);
+  const quoteTime = Date.parse(String(spotPayload.updatedAt)) / 1000;
   if (
-    payload.symbol !== "XAU" ||
-    payload.currency !== "USD" ||
+    spotPayload.symbol !== "XAU" ||
+    spotPayload.currency !== "USD" ||
     !Number.isFinite(price) ||
     price <= 0 ||
     !Number.isFinite(quoteTime) ||
     quoteTime <= 0
   ) {
-    console.error("[market] Gold API returned no usable XAU/USD spot quote", payload);
+    console.error("[market] Gold API returned no usable XAU/USD spot quote", spotPayload);
     throw new Error("empty Gold API spot quote");
   }
 
+  if (!isRecord(historyPayload) || !isRecord(historyPayload.rates)) {
+    console.error("[market] Malformed historical XAU/USD response", historyPayload);
+    throw new Error("malformed historical XAU/USD response");
+  }
+
+  const currentDay = Math.floor(quoteTime / 86_400) * 86_400;
+  const dailyRates = new Map<number, number>();
+  for (const [date, rates] of Object.entries(historyPayload.rates)) {
+    const dateTime = Date.parse(date);
+    const dailyPrice = isRecord(rates) ? Number(rates.USD) : Number.NaN;
+    if (
+      !Number.isFinite(dateTime) ||
+      !Number.isFinite(dailyPrice) ||
+      dailyPrice <= 0
+    ) {
+      console.warn("[market] Ignoring malformed historical XAU/USD point", { date, rates });
+      continue;
+    }
+    const time = Math.floor(dateTime / 86_400_000) * 86_400;
+    if (time < currentDay) dailyRates.set(time, dailyPrice);
+  }
+
+  const historyCandles = [...dailyRates.entries()]
+    .sort(([left], [right]) => left - right)
+    .slice(-GOLD_HISTORY_DAYS)
+    .map(([time, close]) => ({ time, open: close, high: close, low: close, close }));
+  if (historyCandles.length < MIN_GOLD_HISTORY_BARS) {
+    console.error(
+      `[market] Historical XAU/USD returned ${historyCandles.length} daily points; expected at least ${MIN_GOLD_HISTORY_BARS}`,
+    );
+    throw new Error("insufficient historical XAU/USD data");
+  }
+
   const time = Math.floor(quoteTime / PERIODS[interval]) * PERIODS[interval];
+  const previousClose = historyCandles[historyCandles.length - 1]!.close;
   const grace = Math.max(PERIODS[interval] * 4, 20 * 60);
   return {
-    candles: [{ time, open: price, high: price, low: price, close: price }],
+    candles: [
+      ...historyCandles,
+      { time, open: price, high: price, low: price, close: price },
+    ],
     price,
     quoteTime,
-    change: null,
+    change: ((price - previousClose) / previousClose) * 100,
     closed: Date.now() / 1000 - quoteTime > grace,
   };
 }
@@ -200,9 +334,129 @@ async function goldSpotFeed(
 
     const now = Date.now();
     if (now - cached.lastFallbackWarningAt >= FEED_FALLBACK_LOG_INTERVAL_MS) {
-      console.warn("[market] Gold spot request failed; serving the last validated feed", error);
+      console.warn("[market] Gold spot request failed; serving the last validated feed");
       cached.lastFallbackWarningAt = now;
     }
+    return { ...cached.feed, stale: true };
+  }
+}
+
+function parseTwelveDataTime(value: unknown): number {
+  if (typeof value !== "string") return Number.NaN;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(" ", "T")}Z`
+    : value;
+  const milliseconds = Date.parse(normalized);
+  return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : Number.NaN;
+}
+
+async function fetchTwelveDataFeed(
+  symbol: string,
+  interval: Interval,
+): Promise<MarketFeed> {
+  const apiKey = process.env.TWELVE_DATA_API_KEY?.trim();
+  const providerSymbol = TWELVE_DATA_SYMBOLS[symbol];
+  if (!apiKey || !providerSymbol) {
+    throw new Error("Twelve Data is not configured for this market");
+  }
+
+  const url = new URL(TWELVE_DATA_TIME_SERIES);
+  url.searchParams.set("symbol", providerSymbol);
+  url.searchParams.set("interval", TWELVE_DATA_INTERVALS[interval]);
+  url.searchParams.set("outputsize", "500");
+  url.searchParams.set("timezone", "UTC");
+  url.searchParams.set("apikey", apiKey);
+  const payload = await fetchJson(url.toString());
+  if (!isRecord(payload)) {
+    console.warn(`[market] Twelve Data returned a malformed response for ${symbol}`);
+    throw new Error("malformed Twelve Data response");
+  }
+  if (payload.status === "error") {
+    const code = Number(payload.code);
+    throw new Error(
+      code === 429 ? "Twelve Data rate limit reached" : "Twelve Data rejected the request",
+    );
+  }
+  if (!Array.isArray(payload.values)) {
+    console.warn(`[market] Twelve Data returned no candle array for ${symbol}`);
+    throw new Error("empty Twelve Data response");
+  }
+
+  const byTime = new Map<number, Candle>();
+  for (const value of payload.values) {
+    if (!isRecord(value)) continue;
+    const time = parseTwelveDataTime(value.datetime);
+    const open = Number(value.open);
+    const high = Number(value.high);
+    const low = Number(value.low);
+    const close = Number(value.close);
+    if (
+      !Number.isSafeInteger(time) ||
+      time <= 0 ||
+      ![open, high, low, close].every(Number.isFinite) ||
+      open <= 0 ||
+      low <= 0 ||
+      close <= 0 ||
+      high < Math.max(open, low, close) ||
+      low > Math.min(open, high, close)
+    ) {
+      continue;
+    }
+    byTime.set(time, { time, open, high, low, close });
+  }
+
+  const candles = [...byTime.values()].sort((left, right) => left.time - right.time);
+  if (candles.length < MIN_FOREX_METAL_CANDLES) {
+    console.warn(
+      `[market] Twelve Data returned only ${candles.length} valid candles for ${symbol}`,
+    );
+    throw new Error("insufficient Twelve Data candles");
+  }
+
+  const last = candles[candles.length - 1]!;
+  const previous = candles[candles.length - 2]!;
+  const grace = Math.max(PERIODS[interval] * 4, 20 * 60);
+  return {
+    candles,
+    price: last.close,
+    quoteTime: last.time,
+    change: ((last.close - previous.close) / previous.close) * 100,
+    closed: Date.now() / 1000 - last.time > grace,
+  };
+}
+
+async function forexMetalFeed(
+  symbol: string,
+  interval: Interval,
+): Promise<MarketFeed & { stale?: boolean }> {
+  const key = `${symbol}:${interval}`;
+  const apiKey = process.env.TWELVE_DATA_API_KEY?.trim();
+  try {
+    if (apiKey) {
+      try {
+        const feed = await fetchTwelveDataFeed(symbol, interval);
+        forexMetalFeedCache.set(key, { feed, lastFallbackWarningAt: 0 });
+        return feed;
+      } catch {
+        warnForexMetalFallback(
+          `${key}:twelve-data`,
+          symbol,
+          "Twelve Data unavailable; trying the public fallback",
+        );
+      }
+    }
+
+    const feed =
+      symbol === "XAUUSD"
+        ? await goldSpotFeed(interval)
+        : await yahooFeed(symbol, interval);
+    forexMetalFeedCache.set(key, { feed, lastFallbackWarningAt: 0 });
+    return feed;
+  } catch (error) {
+    const cached = forexMetalFeedCache.get(key);
+    if (!cached) throw error;
+
+    warnForexMetalFallback(`${key}:cache`, symbol, "Providers unavailable; serving cached candles");
     return { ...cached.feed, stale: true };
   }
 }
@@ -282,9 +536,9 @@ async function fetchYahooFeed(symbol: string, interval: Interval): Promise<Marke
   }
   const candles = [...byTime.values()].sort((left, right) => left.time - right.time).slice(-180);
   const last = candles[candles.length - 1];
-  if (!last) {
-    console.error(`[market] Yahoo returned no valid candles for ${symbol}`);
-    throw new Error(`empty Yahoo feed for ${symbol}`);
+  if (candles.length < MIN_FOREX_METAL_CANDLES || !last) {
+    console.warn(`[market] Yahoo returned insufficient valid candles for ${symbol}`);
+    throw new Error("insufficient Yahoo candles");
   }
 
   const price = Number(meta.regularMarketPrice ?? last.close);
@@ -322,7 +576,7 @@ async function yahooFeed(
 
     const now = Date.now();
     if (now - cached.lastFallbackWarningAt >= FEED_FALLBACK_LOG_INTERVAL_MS) {
-      console.warn(`[market] Yahoo request failed for ${symbol}; serving the last validated feed`, error);
+      console.warn(`[market] Yahoo request failed for ${symbol}; serving the last validated feed`);
       cached.lastFallbackWarningAt = now;
     }
     return { ...cached.feed, stale: true };
@@ -344,19 +598,23 @@ export const Route = createFileRoute("/api/market")({
         }
 
         try {
-          const feed =
-            coinbaseProductId(symbol) !== null
-              ? await coinbaseProductFeed(symbol, interval as Interval)
-              : symbol === "XAUUSD"
-                ? await goldSpotFeed(interval as Interval)
-                : await yahooFeed(symbol, interval as Interval);
+          const feed = coinbaseProductId(symbol) !== null
+            ? await coinbaseProductFeed(symbol, interval as Interval)
+            : await forexMetalFeed(symbol, interval as Interval);
+          lastGoodMarketFeeds.set(`${symbol}:${interval}`, feed);
           return Response.json(
             { symbol, interval, ...feed },
             { headers: { "cache-control": "no-store" } },
           );
-        } catch (error) {
-          console.error(`[market] ${symbol} feed request failed`, error);
-          return Response.json({ error: "Market feed unavailable" }, { status: 502 });
+        } catch {
+          return Response.json(
+            {
+              symbol,
+              interval,
+              ...unavailableMarketFeed(symbol, interval as Interval),
+            },
+            { headers: { "cache-control": "no-store" } },
+          );
         }
       },
     },
