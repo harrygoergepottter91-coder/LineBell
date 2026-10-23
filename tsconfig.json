@@ -8,6 +8,7 @@
     ],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
     "jsx": "react-jsx",
     "strict": true,
     "isolatedModules": true,
@@ -21,8 +22,6 @@
       "vite/client",
       "node"
     ],
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
     "paths": {
       "@/*": [
         "./src/*"
