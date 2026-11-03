@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-ink: #0c1210;
+  --color-panel: #151c19;
+  --color-raised: #1c2622;
+  --color-line: #2c3a34;
+  --color-fog: #93a399;
+  --color-paper: #e8f2ec;
+  --color-copper: #e4a15c;
+  --color-copper-ink: #2a1c0c;
+  --color-mint: #3dcc8e;
+  --color-mint-ink: #062117;
+  --color-heat: #ff5c45;
+  --color-heat-ink: #2a0c08;
+
+  --radius-card: 1rem;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-ink);
+    color: var(--color-paper);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@keyframes linebell-throb {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 var(--color-heat);
+  }
+  50% {
+    box-shadow: inset 0 0 0 10px color-mix(in srgb, var(--color-heat) 45%, transparent);
+  }
+}
+
+@keyframes linebell-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.alarm-frame {
+  animation: linebell-throb 0.9s ease-in-out infinite;
+}
+
+.live-dot {
+  animation: linebell-blink 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alarm-frame,
+  .live-dot {
+    animation: none;
+  }
+}

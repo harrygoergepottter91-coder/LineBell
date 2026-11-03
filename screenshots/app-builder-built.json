@@ -1,0 +1,42 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Linebell",
+      "hasCanvas": false,
+      "bodyTextLen": 668,
+      "bodyTextHash": "97e97e4714c553a591a8d1f65b8c1e7568cab5d5bdc0340dee016028b0c7c6ca",
+      "bodyTextPrefix": "LINEBELL Set a line. It rings. Connecting BTC ETH SOL BNB XRP DO",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Linebell",
+      "hasCanvas": false,
+      "bodyTextLen": 668,
+      "bodyTextHash": "97e97e4714c553a591a8d1f65b8c1e7568cab5d5bdc0340dee016028b0c7c6ca",
+      "bodyTextPrefix": "LINEBELL Set a line. It rings. Connecting BTC ETH SOL BNB XRP DO",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": true,
+  "baselineReasons": [
+    "desktop: canvas disappeared",
+    "mobile: canvas disappeared",
+    "mobile: body text replaced (similar length, page start changed)"
+  ]
+}
