@@ -350,11 +350,19 @@ function parseTwelveDataTime(value: unknown): number {
   return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : Number.NaN;
 }
 
+function getTwelveDataApiKey(): string | undefined {
+  return (
+    process.env.TWELVE_DATA_API_KEY_2?.trim() ||
+    process.env.TWELVE_DATA_API_KEY?.trim() ||
+    undefined
+  );
+}
+
 async function fetchTwelveDataFeed(
   symbol: string,
   interval: Interval,
 ): Promise<MarketFeed> {
-  const apiKey = process.env.TWELVE_DATA_API_KEY?.trim();
+  const apiKey = getTwelveDataApiKey();
   const providerSymbol = TWELVE_DATA_SYMBOLS[symbol];
   if (!apiKey || !providerSymbol) {
     throw new Error("Twelve Data is not configured for this market");
@@ -430,7 +438,7 @@ async function forexMetalFeed(
   interval: Interval,
 ): Promise<MarketFeed & { stale?: boolean }> {
   const key = `${symbol}:${interval}`;
-  const apiKey = process.env.TWELVE_DATA_API_KEY?.trim();
+  const apiKey = getTwelveDataApiKey();
   try {
     if (apiKey) {
       try {
